@@ -9,7 +9,7 @@ import time
 import numpy as np
 
 from sim import Satellite, Simulator, walker
-from constants import MU_EARTH, R_EARTH, J2, DAY_TO_SEC
+from constants import MU_EARTH, R_EARTH, J2, DAY_TO_SEC, VELOCITY_SLICE
 from astro import cart_to_coe
 
 
@@ -46,7 +46,7 @@ def j2_nodal_regression():
     times, states = sim.propagate((0.0, DAY_TO_SEC),
                                   t_eval=np.linspace(0.0, DAY_TO_SEC, 500))
     raans = np.unwrap([
-        cart_to_coe(states[0, :3, k], states[0, 3:, k], MU_EARTH)[3]
+        cart_to_coe(states[0, :3, k], states[0, VELOCITY_SLICE, k], MU_EARTH)[3]
         for k in range(len(times))
     ])
     slope, _ = np.polyfit(times, raans, 1)
@@ -72,7 +72,7 @@ def drag_decay():
     times, states = sim.propagate((0.0, DAY_TO_SEC),
                                   t_eval=np.linspace(0.0, DAY_TO_SEC, 2000))
     smas = np.array([
-        cart_to_coe(states[0, :3, k], states[0, 3:, k], MU_EARTH)[0]
+        cart_to_coe(states[0, :3, k], states[0, VELOCITY_SLICE, k], MU_EARTH)[0]
         for k in range(len(times))
     ])
     # Average over first and last orbit to suppress J2 short-period oscillations

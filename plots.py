@@ -4,7 +4,7 @@ All public panel functions share the signature
 
     plot_X(times, states, sats, name="")
 
-where `times` is (M,), `states` is (N, 6, M), `sats` is the Satellite list.
+where `times` is (M,), `states` is (N, N_STATES, M), including mass at index 6, `sats` is the Satellite list.
 `summary()` runs all four panels, saves PNGs under
     scenarios/plots/<name>/,
 and (optionally) shows the figures interactively.
@@ -16,7 +16,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from astro import cart_to_coe
-from constants import MU_EARTH, R_EARTH, OMEGA_EARTH
+from constants import MU_EARTH, R_EARTH, OMEGA_EARTH, VELOCITY_SLICE
 
 PLOT_DIR = Path(__file__).parent / "scenarios" / "plots"
 _WALKER_NAME = re.compile(r"^w(\d+)_(\d+)$")
@@ -118,7 +118,7 @@ def plot_elements(times, states, sats, name=""):
     elems = np.empty((N, 6, M))
     for i in range(N):
         for k in range(M):
-            elems[i, :, k] = cart_to_coe(states[i, :3, k], states[i, 3:, k], MU_EARTH)
+            elems[i, :, k] = cart_to_coe(states[i, :3, k], states[i, VELOCITY_SLICE, k], MU_EARTH)
 
     t_h = times / 3600.0
 

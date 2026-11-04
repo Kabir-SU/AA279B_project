@@ -5,7 +5,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 
 from astro import coe_to_cart
-from constants import MU_EARTH
+from constants import MU_EARTH, N_STATES, POSITION_SLICE, VELOCITY_SLICE, MASS_INDEX
 from dynamics import accelerations
 
 
@@ -67,7 +67,7 @@ class Simulator:
     All N satellites are integrated in a single solve_ivp call for efficiency.
     """
 
-    def __init__(self, satellites, perturbations=("J2", "drag"),
+    def __init__(self, satellites: list[Satellite], perturbations=("J2", "drag"),
                  earth_rotation=True, rtol=1e-12, atol=1e-12, method="DOP853"):
         self.satellites = list(satellites)
         self.perturbations = set(perturbations)
@@ -82,15 +82,19 @@ class Simulator:
         Returns
         -------
         times : ndarray (M,)
-        states : ndarray (N, 6, M)   ECI (r, v) in km, km/s
+        states : ndarray (N, N_STATES, M)
+            ECI position [km], velocity [km/s], and mass [kg].
         """
         N = len(self.satellites)
-        flat0 = np.empty(6 * N)
-        cda_over_m = np.empty(N)
+        initial_state = np.zeros((N, N_STATES))
+        cda = np.empty(N)
         for i, sat in enumerate(self.satellites):
-            flat0[6 * i:6 * i + 3] = sat.r
-            flat0[6 * i + 3:6 * i + 6] = sat.v
-            cda_over_m[i] = sat.cd * sat.area / sat.mass
+            if not np.isfinite(sat.mass) or sat.mass <= 0:
+                raise ValueError("Satellite mass must be finite and positive.")
+            initial_state[i, POSITION_SLICE] = sat.r
+            initial_state[i, VELOCITY_SLICE] = sat.v
+            initial_state[i, MASS_INDEX] = sat.mass
+            cda[i] = sat.cd * sat.area
 
         use_j2 = "J2" in self.perturbations
         use_drag = "drag" in self.perturbations
@@ -98,15 +102,15 @@ class Simulator:
         sol = solve_ivp(
             accelerations,
             t_span,
-            flat0,
+            initial_state.ravel(),
             t_eval=t_eval,
             method=self.method,
             rtol=self.rtol,
             atol=self.atol,
-            args=(cda_over_m, use_j2, use_drag, self.earth_rotation),
+            args=(cda, use_j2, use_drag, self.earth_rotation),
         )
         if not sol.success:
             raise RuntimeError(f"Propagation failed: {sol.message}")
 
-        states = sol.y.reshape(N, 6, -1)
+        states = sol.y.reshape(N, N_STATES, -1)
         return sol.t, states
