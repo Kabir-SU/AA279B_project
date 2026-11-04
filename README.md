@@ -46,6 +46,10 @@ times, states = sim.propagate(t_span=(0.0, 86400.0),
 summary(times, states, sats, name="my_run")
 ```
 
+## Thrust commands
+Continuous throttle (optimizer can restruct like `[0, 0.25, 0.5, 0.75, 1]` when needed).
+Thrust is off unless a satellite has a `thrust_command` callback (piecewise basically).
+
 ## Adding a scenario
 
 Copy `scenarios/walker_leo.py` and adjust the constellation / horizon / perturbations:

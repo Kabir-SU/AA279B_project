@@ -10,6 +10,7 @@ N_STATES = 7
 POSITION_SLICE = slice(0, 3)
 VELOCITY_SLICE = slice(3, 6)
 MASS_INDEX = 6
+G0 = 9.80665                  # standard gravity [m/s^2], for specific impulse
 
 # Earth gravity and shape
 MU_EARTH = 398600.4418          # km^3 / s^2

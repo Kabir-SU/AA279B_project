@@ -10,6 +10,24 @@ from dynamics import accelerations
 
 
 @dataclass
+class Thruster:
+    max_thrust: float
+    isp: float
+    min_thrust: float = 0.0
+
+    def __post_init__(self):
+        if not (0 <= self.min_thrust <= self.max_thrust < np.inf
+                and 0 < self.max_thrust and 0 < self.isp < np.inf):
+            raise ValueError("Require 0 <= min_thrust <= max_thrust, max_thrust > 0, isp > 0.")
+
+    def force(self, throttle):
+        """Clamp to 0-1"""
+        throttle = np.clip(throttle, 0, 1)
+        force = throttle * self.max_thrust
+        return force
+
+
+@dataclass
 class Satellite:
     """ECI state (km, km/s) plus ballistic properties for a single spacecraft."""
     r: np.ndarray
@@ -18,16 +36,20 @@ class Satellite:
     area: float
     cd: float = 2.2
     name: str = ""
+    thruster: Thruster = None
+    dry_mass: float = None
+    thrust_command: object = None
 
     def __post_init__(self):
         self.r = np.asarray(self.r, dtype=float)
         self.v = np.asarray(self.v, dtype=float)
 
     @classmethod
-    def from_elements(cls, elements, mass, area, cd=2.2, name=""):
+    def from_elements(cls, elements, mass, area, cd=2.2, name="", *,
+                      thruster=None, dry_mass=None, thrust_command=None):
         """Build from classical elements (a, e, inc, raan, arg_peri, M). Angles in rad."""
         r, v = coe_to_cart(elements, MU_EARTH)
-        return cls(r=r, v=v, mass=mass, area=area, cd=cd, name=name)
+        return cls(r, v, mass, area, cd, name, thruster, dry_mass, thrust_command)
 
 
 def walker(T, P, F, a, e, inc_deg, mass, area, cd=2.2, arg_peri=0.0, raan0=0.0):
@@ -76,8 +98,9 @@ class Simulator:
         self.atol = atol
         self.method = method
 
-    def propagate(self, t_span, t_eval=None):
+    def propagate(self, t_span, t_eval=None, max_step=np.inf):
         """Integrate from t_span[0] to t_span[1].
+        max_step limits adaptive steps [s]
 
         Returns
         -------
@@ -107,10 +130,16 @@ class Simulator:
             method=self.method,
             rtol=self.rtol,
             atol=self.atol,
-            args=(cda, use_j2, use_drag, self.earth_rotation),
+            max_step=max_step,
+            args=(cda, use_j2, use_drag, self.earth_rotation, self.satellites),
         )
         if not sol.success:
             raise RuntimeError(f"Propagation failed: {sol.message}")
 
         states = sol.y.reshape(N, N_STATES, -1)
+
+        # Clamp numerical undershoot at fuel cutoff.
+        for i, sat in enumerate(self.satellites):
+            if sat.thrust_command is not None:
+                states[i, MASS_INDEX] = np.maximum(states[i, MASS_INDEX], sat.dry_mass)
         return sol.t, states
