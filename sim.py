@@ -5,8 +5,26 @@ import numpy as np
 from scipy.integrate import solve_ivp
 
 from astro import coe_to_cart
-from constants import MU_EARTH
+from constants import MU_EARTH, N_STATES, POSITION_SLICE, VELOCITY_SLICE, MASS_INDEX
 from dynamics import accelerations
+
+
+@dataclass
+class Thruster:
+    max_thrust: float
+    isp: float
+    min_thrust: float = 0.0
+
+    def __post_init__(self):
+        if not (0 <= self.min_thrust <= self.max_thrust < np.inf
+                and 0 < self.max_thrust and 0 < self.isp < np.inf):
+            raise ValueError("Require 0 <= min_thrust <= max_thrust, max_thrust > 0, isp > 0.")
+
+    def force(self, throttle):
+        """Clamp to 0-1"""
+        throttle = np.clip(throttle, 0, 1)
+        force = throttle * self.max_thrust
+        return force
 
 
 @dataclass
@@ -18,16 +36,20 @@ class Satellite:
     area: float
     cd: float = 2.2
     name: str = ""
+    thruster: Thruster = None
+    dry_mass: float = None
+    thrust_command: object = None
 
     def __post_init__(self):
         self.r = np.asarray(self.r, dtype=float)
         self.v = np.asarray(self.v, dtype=float)
 
     @classmethod
-    def from_elements(cls, elements, mass, area, cd=2.2, name=""):
+    def from_elements(cls, elements, mass, area, cd=2.2, name="", *,
+                      thruster=None, dry_mass=None, thrust_command=None):
         """Build from classical elements (a, e, inc, raan, arg_peri, M). Angles in rad."""
         r, v = coe_to_cart(elements, MU_EARTH)
-        return cls(r=r, v=v, mass=mass, area=area, cd=cd, name=name)
+        return cls(r, v, mass, area, cd, name, thruster, dry_mass, thrust_command)
 
 
 def walker(T, P, F, a, e, inc_deg, mass, area, cd=2.2, arg_peri=0.0, raan0=0.0):
@@ -67,7 +89,7 @@ class Simulator:
     All N satellites are integrated in a single solve_ivp call for efficiency.
     """
 
-    def __init__(self, satellites, perturbations=("J2", "drag"),
+    def __init__(self, satellites: list[Satellite], perturbations=("J2", "drag"),
                  earth_rotation=True, rtol=1e-12, atol=1e-12, method="DOP853"):
         self.satellites = list(satellites)
         self.perturbations = set(perturbations)
@@ -76,21 +98,26 @@ class Simulator:
         self.atol = atol
         self.method = method
 
-    def propagate(self, t_span, t_eval=None):
+    def propagate(self, t_span, t_eval=None, max_step=np.inf):
         """Integrate from t_span[0] to t_span[1].
+        max_step limits adaptive steps [s]
 
         Returns
         -------
         times : ndarray (M,)
-        states : ndarray (N, 6, M)   ECI (r, v) in km, km/s
+        states : ndarray (N, N_STATES, M)
+            ECI position [km], velocity [km/s], and mass [kg].
         """
         N = len(self.satellites)
-        flat0 = np.empty(6 * N)
-        cda_over_m = np.empty(N)
+        initial_state = np.zeros((N, N_STATES))
+        cda = np.empty(N)
         for i, sat in enumerate(self.satellites):
-            flat0[6 * i:6 * i + 3] = sat.r
-            flat0[6 * i + 3:6 * i + 6] = sat.v
-            cda_over_m[i] = sat.cd * sat.area / sat.mass
+            if not np.isfinite(sat.mass) or sat.mass <= 0:
+                raise ValueError("Satellite mass must be finite and positive.")
+            initial_state[i, POSITION_SLICE] = sat.r
+            initial_state[i, VELOCITY_SLICE] = sat.v
+            initial_state[i, MASS_INDEX] = sat.mass
+            cda[i] = sat.cd * sat.area
 
         use_j2 = "J2" in self.perturbations
         use_drag = "drag" in self.perturbations
@@ -98,15 +125,21 @@ class Simulator:
         sol = solve_ivp(
             accelerations,
             t_span,
-            flat0,
+            initial_state.ravel(),
             t_eval=t_eval,
             method=self.method,
             rtol=self.rtol,
             atol=self.atol,
-            args=(cda_over_m, use_j2, use_drag, self.earth_rotation),
+            max_step=max_step,
+            args=(cda, use_j2, use_drag, self.earth_rotation, self.satellites),
         )
         if not sol.success:
             raise RuntimeError(f"Propagation failed: {sol.message}")
 
-        states = sol.y.reshape(N, 6, -1)
+        states = sol.y.reshape(N, N_STATES, -1)
+
+        # Clamp numerical undershoot at fuel cutoff.
+        for i, sat in enumerate(self.satellites):
+            if sat.thrust_command is not None:
+                states[i, MASS_INDEX] = np.maximum(states[i, MASS_INDEX], sat.dry_mass)
         return sol.t, states

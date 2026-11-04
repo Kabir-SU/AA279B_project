@@ -5,6 +5,13 @@ All distances in km, times in s, masses in kg, densities in kg/m^3.
 
 import numpy as np
 
+# Per-satellite propagated state: position [km], velocity [km/s], mass [kg].
+N_STATES = 7
+POSITION_SLICE = slice(0, 3)
+VELOCITY_SLICE = slice(3, 6)
+MASS_INDEX = 6
+G0 = 9.80665                  # standard gravity [m/s^2], for specific impulse
+
 # Earth gravity and shape
 MU_EARTH = 398600.4418          # km^3 / s^2
 R_EARTH = 6378.137              # km (equatorial)
