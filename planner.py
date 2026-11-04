@@ -251,6 +251,10 @@ def algorithm_2(
         Total velocity increment, including drift drag compensation [km/s].
     ToF : float
         Total duration of the three phases [s].
+
+    References
+    ----------
+    Riccardo - Low-Thrust Propulsion and Drift Orbit Optimization for Multi-Client Servicing Missions in Low Earth Orbit
     """
     # 1: Initial orbit -> drift orbit
     Delta_V_1, Delta_t_1, Delta_Omega_1, leg1 = algorithm_1(
