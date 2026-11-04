@@ -3,10 +3,10 @@
 import numpy as np
 
 from sim import Simulator, walker, Satellite
-from constants import DAY_TO_SEC, MIN_TO_SEC
+from constants import MIN_TO_SEC
 from plots import summary
 
-NAME = "walker_leo"
+NAME = __file__.split("/")[-1].split(".")[0]
 
 
 def run():
