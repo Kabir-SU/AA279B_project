@@ -74,8 +74,8 @@ def _savefig(fig, name, panel):
 # Panels
 # ---------------------------------------------------------------------------
 
-def plot_trajectories_3d(times, states, sats, name=""):
-    """3D ECI trajectories around an Earth sphere, colored by Walker plane."""
+def plot_trajectories_3d(times, states, sats, name="", plot_endpoints=False):
+    """3D ECI trajectories; optionally mark starts with Xs and ends with dots."""
     colors, planes, n_planes = _plane_colors(sats)
 
     fig = plt.figure(figsize=(9, 8))
@@ -90,13 +90,20 @@ def plot_trajectories_3d(times, states, sats, name=""):
             label = f"plane {planes[i]}"
             labeled_planes.add(planes[i])
         ax.plot(r[0], r[1], r[2], color=colors[i], linewidth=0.8, label=label)
+        if plot_endpoints:
+            ax.scatter(r[0, 0], r[1, 0], r[2, 0], color=colors[i],
+                       marker="x", s=45, linewidths=1.5, depthshade=False,
+                       label="starting position" if i == 0 else None)
+            ax.scatter(r[0, -1], r[1, -1], r[2, -1], color=colors[i],
+                       s=35, edgecolors="black", linewidths=0.5, depthshade=False,
+                       label="final position" if i == 0 else None)
 
     ax.set_xlabel("x [km]")
     ax.set_ylabel("y [km]")
     ax.set_zlabel("z [km]")
     ax.set_title(f"ECI trajectories ({len(sats)} sats, {times[-1] / 3600:.1f} h){' - ' + name if name else ''}")
     set_axes_equal(ax)
-    if labeled_planes:
+    if labeled_planes or (plot_endpoints and len(sats)):
         ax.legend(loc="upper right", fontsize=8)
     fig.tight_layout()
     _savefig(fig, name, "trajectories")
@@ -208,9 +215,9 @@ def plot_ground_tracks(times, states, sats, name=""):
 # Dispatcher
 # ---------------------------------------------------------------------------
 
-def summary(times, states, sats, name="", show=True):
-    """Run every panel, save PNGs under scenarios/plots/<name>/, optionally show."""
-    plot_trajectories_3d(times, states, sats, name)
+def summary(times, states, sats, name="", show=True, plot_endpoints=False):
+    """Save/show all panels; plot_endpoints enables 3D start and final markers."""
+    plot_trajectories_3d(times, states, sats, name, plot_endpoints=plot_endpoints)
     plot_elements(times, states, sats, name)
     plot_altitude(times, states, sats, name)
     plot_ground_tracks(times, states, sats, name)
