@@ -25,7 +25,6 @@ def density(h_km):
     )
     return np.where((h >= 0.0) & (h < ATMOSPHERE_MAX_ALT), rho, 0.0)
 
-
 def accelerations(t, flat_state, cda, use_j2, use_drag, earth_rotation, satellites):
     """Right-hand side for N-satellite propagation. Returns d/dt flat_state."""
     N = cda.size
