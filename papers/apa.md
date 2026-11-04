@@ -1,0 +1,6 @@
+- Assumptions
+  - Nearly circular
+  - phasing maneuver cost negligible
+    - Impact is evaluated
+  - can define distance metric between orbits
+  - 
