@@ -7,13 +7,13 @@ from pathlib import Path
 
 import numpy as np
 
-from constants import MIN_TO_SEC, POSITION_SLICE, VELOCITY_SLICE, MASS_INDEX
+from constants import DAY_TO_SEC, POSITION_SLICE, VELOCITY_SLICE, MASS_INDEX
 from plots import summary
 from sim import Satellite, Simulator, Thruster
 
 NAME = Path(__file__).stem
-DURATION = 60 * MIN_TO_SEC
 THROTTLE = 1.0
+DURATION = DAY_TO_SEC
 
 
 def tangential_thrust(t, state):
@@ -26,7 +26,7 @@ def tangential_thrust(t, state):
 
 def run(show=True):
     phases = [0, 60, 120, 180, 240, 300]
-    thruster = Thruster(max_thrust=30, min_thrust=0.01, isp=1500.0)
+    thruster = Thruster(max_thrust=5, min_thrust=0.01, isp=1000.0)
     sats = [Satellite.from_elements(
         elements=(7000.0, 0.001, np.deg2rad(55.0), 0.0, 0.0, np.deg2rad(phase)),
         mass=100.0, area=1.0, cd=2.2, name=f"sat_{i}",
