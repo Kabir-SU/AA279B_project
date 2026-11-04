@@ -8,14 +8,13 @@ GPS orbit reference: https://www.gps.gov/space-segment
 import argparse
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 from scipy.integrate import trapezoid
 
 from astro import cart_to_coe, coe_to_cart, wrap_to_pi
 from constants import DAY_TO_SEC, G0, J2, MU_EARTH, R_EARTH
 from planner import algorithm_1, make_w_ecl
-from plots import summary, plot_earth, set_axes_equal
+from plots import summary, plot_target_constellation, finish_plots
 from sim import Satellite, Simulator, Thruster, walker
 
 GPS_A = R_EARTH + 20200.0
@@ -109,16 +108,9 @@ def run(mode="one", show=True, plan_only=False, days=None, eclipses=True):
     name = f"gps_deployment_{mode}" + ("" if eclipses else "_no_eclipse")
     summary(times, states, sats, name=name, show=False, plot_endpoints=True)
 
-    # Show the desired constellation and actual endpoints at the same epoch.
-    fig = plt.figure(figsize=(9, 9))
-    ax = fig.add_subplot(111, projection="3d")
-    plot_earth(ax)
     node_rate, u_rate = target_rates()
-    for plane in range(6):
-        node = plane*np.pi/3+node_rate*end
-        ring = np.array([coe_to_cart((GPS_A, 0, GPS_I, node, 0, u), MU_EARTH)[0]
-                         for u in np.linspace(0, 2*np.pi, 100)])
-        ax.plot(*ring.T, alpha=.35)
+    planes = [(GPS_A, 0, GPS_I, plane*np.pi/3+node_rate*end, 0, 0)
+              for plane in range(6)]
     expected = []
     print("Osculating errors at the propagation end relative to moving Walker targets:")
     for j, target in enumerate(targets):
@@ -133,21 +125,16 @@ def run(mode="one", show=True, plan_only=False, days=None, eclipses=True):
               f"RAAN error={np.rad2deg(wrap_to_pi(node-target_coe[3])):.2f} deg, "
               f"phase error={np.rad2deg(phase_error):.2f} deg, "
               f"fuel={500-states[j, 6, -1]:.2f} kg")
-    ax.scatter(*np.array(expected).T, marker="x", color="black", label="Target slots")
-    ax.scatter(*states[:, :3, -1].T, color="red", label="Propagated endpoints")
-    ax.set(xlabel="ECI x [km]", ylabel="ECI y [km]", zlabel="ECI z [km]",
-           title="GPS-like Walker 24/6/1 target and propagated endpoints")
-    ax.legend()
-    set_axes_equal(ax)
+    plot_target_constellation(
+        states[:, :3, -1], expected, planes, name=name,
+        title="GPS-like Walker 24/6/1 target and propagated endpoints",
+        final_velocities=states[:, 3:6, -1],
+    )
     output = Path(__file__).parent / "plots" / name
     output.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output / "target_constellation.png", dpi=150)
     np.savez_compressed(output / "propagation.npz", times=times, states=states)
     print("Slot phases are initial guesses; the planner does not enforce final phasing.")
-    if show:
-        plt.show()
-    else:
-        plt.close("all")
+    finish_plots(show)
     return times, states
 
 

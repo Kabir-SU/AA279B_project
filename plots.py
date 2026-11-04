@@ -1,13 +1,14 @@
 """Standardized plot panels for constellation propagator output.
 
-All public panel functions share the signature
+The standard propagation panels share the signature
 
     plot_X(times, states, sats, name="")
 
 where `times` is (M,), `states` is (N, N_STATES, M), including mass at index 6, `sats` is the Satellite list.
 `summary()` runs all four panels, saves PNGs under
     scenarios/plots/<name>/,
-and (optionally) shows the figures interactively.
+and (optionally) shows the figures interactively. Planner comparisons and
+constellation endpoint comparisons are available as separate panels.
 """
 
 from pathlib import Path
@@ -15,8 +16,8 @@ import re
 import numpy as np
 import matplotlib.pyplot as plt
 
-from astro import cart_to_coe
-from constants import MU_EARTH, R_EARTH, OMEGA_EARTH, VELOCITY_SLICE
+from astro import cart_to_coe, coe_to_cart
+from constants import MU_EARTH, R_EARTH, OMEGA_EARTH, VELOCITY_SLICE, DAY_TO_SEC
 
 PLOT_DIR = Path(__file__).parent / "scenarios" / "plots"
 _WALKER_NAME = re.compile(r"^w(\d+)_(\d+)$")
@@ -209,6 +210,87 @@ def plot_ground_tracks(times, states, sats, name=""):
     fig.tight_layout()
     _savefig(fig, name, "ground_tracks")
     return fig
+
+
+def plot_planner_comparison(times, states, elements, plan, common,
+                            target_node, expected_fuel, name=""):
+    """Compare a single satellite with its averaged thrust-drift-thrust plan."""
+    fig, axes = plt.subplots(4, 1, figsize=(10, 10), sharex=True)
+    t1, t2, _ = plan["durations"]
+    boundaries = np.array([0, t1, t1+t2, times[-1]])
+    node = np.unwrap(elements[:, 3])
+    days = times/DAY_TO_SEC
+    axes[0].plot(days, elements[:, 0]-R_EARTH, label="Propagated (osculating)")
+    axes[0].axhline(common["a_f"]-R_EARTH, color="k", ls=":", label="Target")
+    for leg, start in [(plan["leg1"], 0), (plan["leg3"], t1+t2)]:
+        axes[0].plot((leg["t"]-leg["t"][0]+start)/DAY_TO_SEC, leg["a"]-R_EARTH, "--", color="tab:orange")
+    axes[0].plot(np.array([t1, t1+t2])/DAY_TO_SEC, [plan["leg1"]["a"][-1]-R_EARTH]*2, "--", color="tab:orange", label="Planner")
+    axes[0].set_ylabel("a − Earth radius [km]")
+    axes[0].legend()
+    axes[1].plot(days, np.rad2deg(elements[:, 2]))
+    axes[1].axhline(np.rad2deg(common["i_f"]), color="k", ls=":")
+    axes[1].set_ylabel("Inclination [deg]")
+    axes[2].plot(days, np.rad2deg(node), label="Propagated")
+    axes[2].plot(days, np.rad2deg(target_node), "--", label="Target plane")
+    axes[2].set_ylabel("RAAN [deg]")
+    axes[2].legend()
+    axes[3].plot(days, states[0, 6])
+    axes[3].axhline(common["m_i"]-expected_fuel, color="k", ls=":", label="Planner final mass")
+    axes[3].set_ylabel("Mass [kg]")
+    axes[3].set_xlabel("Time [days]")
+    axes[3].legend()
+    for ax in axes:
+        for boundary in boundaries[1:-1]:
+            ax.axvline(boundary/DAY_TO_SEC, color="gray", ls=":", alpha=.5)
+        ax.grid(alpha=.2)
+    fig.suptitle("Planned low-thrust deployment: thrust / drift / thrust")
+    fig.tight_layout()
+    _savefig(fig, name, "planner_vs_propagation")
+    return fig
+
+
+def plot_target_constellation(final_positions, target_positions, plane_elements,
+                              name="", title="Target constellation and propagated endpoints",
+                              final_velocities=None):
+    """Show orbit rings and compare actual and target ECI endpoint positions.
+
+    Position arrays have shape (N, 3); plane_elements contains (a, e, i, RAAN,
+    argument of periapsis, M) tuples at the comparison epoch.
+    Supply final_velocities to draw the actual final osculating orbits too.
+    """
+    fig = plt.figure(figsize=(9, 9))
+    ax = fig.add_subplot(111, projection="3d")
+    plot_earth(ax)
+    for j, elements in enumerate(plane_elements):
+        ring = np.array([coe_to_cart((*elements[:5], u), MU_EARTH)[0]
+                         for u in np.linspace(0, 2*np.pi, 721)])
+        ax.plot(*ring.T, alpha=.35, label="Target orbits" if j == 0 else None)
+    if final_velocities is not None:
+        for j, (r, v) in enumerate(zip(final_positions, final_velocities)):
+            elements = cart_to_coe(r, v, MU_EARTH)
+            # Include the endpoint's exact anomaly as a vertex of its orbit.
+            anomalies = np.sort(np.r_[np.linspace(0, 2*np.pi, 721), elements[5]])
+            ring = np.array([coe_to_cart((*elements[:5], u), MU_EARTH)[0]
+                             for u in anomalies])
+            ax.plot(*ring.T, "--", color="red", linewidth=.8, alpha=.6,
+                    label="Final osculating orbits" if j == 0 else None)
+    ax.scatter(*np.asarray(target_positions).T, marker="x", color="black",
+               depthshade=False, label="Target slots")
+    ax.scatter(*np.asarray(final_positions).T, color="red",
+               depthshade=False, label="Propagated endpoints")
+    ax.set(xlabel="ECI x [km]", ylabel="ECI y [km]", zlabel="ECI z [km]", title=title)
+    ax.legend()
+    set_axes_equal(ax)
+    _savefig(fig, name, "target_constellation")
+    return fig
+
+
+def finish_plots(show=True):
+    """Display the current figures, or close them for a noninteractive run."""
+    if show:
+        plt.show()
+    else:
+        plt.close("all")
 
 
 # ---------------------------------------------------------------------------

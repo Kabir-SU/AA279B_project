@@ -5,14 +5,12 @@ Also propagates the planned thrust schedule with J2, drag, and eclipses.
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
-from pathlib import Path
 
 from astro import cart_to_coe
 from constants import DAY_TO_SEC, G0, R_EARTH, MU_EARTH, OMEGA_EARTH, J2
 from dynamics import density
 from planner import algorithm_1, algorithm_2, make_w_ecl
-from plots import summary
+from plots import summary, plot_planner_comparison, finish_plots
 from sim import Satellite, Simulator, Thruster
 
 
@@ -120,40 +118,11 @@ def propagate_plan(common, plan, planned_dv, duration, show):
     print(f"Final RAAN error: {np.rad2deg(error_node):.4f} deg")
     print(f"Fuel: propagated {fuel:.3f} kg; planner {expected_fuel:.3f} kg")
 
-    fig, axes = plt.subplots(4, 1, figsize=(10, 10), sharex=True)
-    days = times/DAY_TO_SEC
-    axes[0].plot(days, elements[:, 0]-R_EARTH, label="Propagated (osculating)")
-    axes[0].axhline(700, color="k", ls=":", label="Target")
-    for leg, start in [(plan["leg1"], 0), (plan["leg3"], t1+t2)]:
-        axes[0].plot((leg["t"]-leg["t"][0]+start)/DAY_TO_SEC, leg["a"]-R_EARTH, "--", color="tab:orange")
-    axes[0].plot(np.array([t1, t1+t2])/DAY_TO_SEC, [600, 600], "--", color="tab:orange", label="Planner")
-    axes[0].set_ylabel("a − Earth radius [km]")
-    axes[0].legend()
-    axes[1].plot(days, np.rad2deg(elements[:, 2]))
-    axes[1].axhline(55, color="k", ls=":")
-    axes[1].set_ylabel("Inclination [deg]")
-    axes[2].plot(days, np.rad2deg(node), label="Propagated")
-    axes[2].plot(days, np.rad2deg(target_node), "--", label="Target plane")
-    axes[2].set_ylabel("RAAN [deg]")
-    axes[2].legend()
-    axes[3].plot(days, states[0, 6])
-    axes[3].axhline(common["m_i"]-expected_fuel, color="k", ls=":", label="Planner final mass")
-    axes[3].set_ylabel("Mass [kg]")
-    axes[3].set_xlabel("Time [days]")
-    axes[3].legend()
-    for ax in axes:
-        for boundary in boundaries[1:-1]:
-            ax.axvline(boundary/DAY_TO_SEC, color="gray", ls=":", alpha=.5)
-        ax.grid(alpha=.2)
-    fig.suptitle("Planned low-thrust deployment: thrust / drift / thrust")
-    fig.tight_layout()
-    output = Path(__file__).parent / "plots" / "low_thrust_drift"
-    output.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output / "planner_vs_propagation.png", dpi=150)
+    plot_planner_comparison(times, states, elements, plan, common,
+                            target_node, expected_fuel, name="low_thrust_drift")
     summary(times, states, [sat], name="low_thrust_drift",
-            show=show, plot_endpoints=True)
-    if not show:
-        plt.close("all")
+            show=False, plot_endpoints=True)
+    finish_plots(show)
     return times, states
 
 
