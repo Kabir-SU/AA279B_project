@@ -5,7 +5,7 @@ Keplerian: (a, e, inc, raan, arg_peri, M).
 """
 
 import numpy as np
-
+from constants import J2, MU_EARTH, R_EARTH
 
 def wrap_to_2pi(angle):
     return angle % (2.0 * np.pi)
@@ -13,6 +13,31 @@ def wrap_to_2pi(angle):
 
 def wrap_to_pi(angle):
     return (angle + np.pi) % (2.0 * np.pi) - np.pi
+
+
+def j2_reference(elements, times, epoch=0.0):
+    """Sample a target orbit using first-order secular J2 rates: shape (6, M).
+
+    Elements are (a, e, i, RAAN, argument of periapsis, M), in km/radians;
+    times and epoch are seconds. Circular orbits use argument of latitude in
+    M and zero argument of periapsis. These are mean reference elements,
+    without short-period perturbations, drag, or thrust.
+    """
+
+    a, e, inc, node, omega, mean = elements
+    n = np.sqrt(MU_EARTH/a**3)
+    k = .75*J2*n*(R_EARTH/(a*(1-e*e)))**2
+    node_rate = -2*k*np.cos(inc)
+    omega_rate = k*(5*np.cos(inc)**2-1)
+    mean_rate = n+k*np.sqrt(1-e*e)*(3*np.cos(inc)**2-1)
+    if e < 1e-10:
+        mean += omega
+        omega = 0.0
+        mean_rate += omega_rate
+        omega_rate = 0.0
+    result = np.repeat(np.array([a, e, inc, node, omega, mean], dtype=float)[:, None], len(times), axis=1)
+    result[3:] += np.array([node_rate, omega_rate, mean_rate])[:, None]*(np.asarray(times)-epoch)
+    return result
 
 
 def solve_kepler(M, e, eps=1e-12, max_iter=50):

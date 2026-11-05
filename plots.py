@@ -45,6 +45,7 @@ def set_axes_equal(ax):
     ax.set_xlim3d(xm - half, xm + half)
     ax.set_ylim3d(ym - half, ym + half)
     ax.set_zlim3d(zm - half, zm + half)
+    ax.set_box_aspect((1, 1, 1))
 
 
 def _plane_colors(sats):
@@ -75,13 +76,19 @@ def _savefig(fig, name, panel):
 # Panels
 # ---------------------------------------------------------------------------
 
-def plot_trajectories_3d(times, states, sats, name="", plot_endpoints=False):
+def plot_trajectories_3d(times, states, sats, name="", plot_endpoints=False, *, target_elements=None):
     """3D ECI trajectories; optionally mark starts with Xs and ends with dots."""
     colors, planes, n_planes = _plane_colors(sats)
 
     fig = plt.figure(figsize=(9, 8))
     ax = fig.add_subplot(111, projection="3d")
     plot_earth(ax)
+
+    angle = np.linspace(0, 2*np.pi, 181)
+    ax.plot(R_EARTH*np.cos(angle), R_EARTH*np.sin(angle), np.zeros_like(angle),
+            "--", color="black", linewidth=1, label="Earth equator")
+    ax.plot([0, 0], [0, 0], [-1.2*R_EARTH, 1.2*R_EARTH], ":", color="gray")
+    ax.text(0, 0, 1.25*R_EARTH, "North (+z)", fontsize=8)
 
     labeled_planes = set()
     for i, _ in enumerate(sats):
@@ -98,20 +105,40 @@ def plot_trajectories_3d(times, states, sats, name="", plot_endpoints=False):
             ax.scatter(r[0, -1], r[1, -1], r[2, -1], color=colors[i],
                        s=35, edgecolors="black", linewidths=0.5, depthshade=False,
                        label="final position" if i == 0 else None)
+        if len(sats) == 1:
+            start = cart_to_coe(r[:, 0], states[i, VELOCITY_SLICE, 0], MU_EARTH)
+            end = cart_to_coe(r[:, -1], states[i, VELOCITY_SLICE, -1], MU_EARTH)
+            ax.text2D(.02, .95, f"Inclination: {np.rad2deg(start[2]):.3f}° → "
+                      f"{np.rad2deg(end[2]):.3f}°\nMeasured from Earth's equator",
+                      transform=ax.transAxes, fontsize=9)
+            velocity = states[i, VELOCITY_SLICE, -1]
+            arrow = velocity/np.linalg.norm(velocity)*.2*R_EARTH
+            ax.quiver(*r[:, -1], *arrow, color=colors[i], linewidth=2,
+                      arrow_length_ratio=.3, label="Final velocity direction")
+
+    if target_elements is not None:
+        for j, reference in enumerate(target_elements):
+            elements = reference[:, -1]
+            anomalies = np.sort(np.r_[np.linspace(0, 2*np.pi, 361), elements[5]])
+            ring = np.array([coe_to_cart((*elements[:5], u), MU_EARTH)[0] for u in anomalies])
+            ax.plot(*ring.T, "--", color=colors[j % len(colors)], alpha=.6,
+                    label="Target orbit at final time" if j == 0 else None)
+            point, _ = coe_to_cart(elements, MU_EARTH)
+            ax.scatter(*point, marker="+", color=colors[j % len(colors)], depthshade=False,
+                       label="Reference position at final time" if j == 0 else None)
 
     ax.set_xlabel("x [km]")
     ax.set_ylabel("y [km]")
     ax.set_zlabel("z [km]")
     ax.set_title(f"ECI trajectories ({len(sats)} sats, {times[-1] / 3600:.1f} h){' - ' + name if name else ''}")
     set_axes_equal(ax)
-    if labeled_planes or (plot_endpoints and len(sats)):
-        ax.legend(loc="upper right", fontsize=8)
+    ax.legend(loc="upper right", fontsize=8)
     fig.tight_layout()
     _savefig(fig, name, "trajectories")
     return fig
 
 
-def plot_elements(times, states, sats, name=""):
+def plot_elements(times, states, sats, name="", *, target_elements=None):
     """Classical orbital elements vs time (2x3 grid)."""
     colors, planes, _ = _plane_colors(sats)
 
@@ -139,6 +166,20 @@ def plot_elements(times, states, sats, name=""):
             ax.plot(t_h, d[i], color=colors[i], linewidth=0.6)
         ax.set_ylabel(title)
         ax.grid(True, alpha=0.3)
+    if target_elements is not None:
+        for j, reference in enumerate(target_elements):
+            values = [reference[0], reference[1], np.rad2deg(reference[2]),
+                      np.rad2deg(np.unwrap(reference[3])),
+                      np.rad2deg(reference[4] % (2*np.pi)),
+                      np.rad2deg(reference[5] % (2*np.pi))]
+            for ax, value in zip(axes.flat, values):
+                ax.plot(t_h, value, "--", color=colors[j % N], linewidth=1,
+                        label="Target at time t" if j == 0 else None)
+            # Periapsis is undefined for circular targets; avoid suggesting
+            # that the arbitrary zero reference is a tracking constraint.
+            if np.all(reference[1] < 1e-10):
+                axes[1, 1].lines[-1].remove()
+        axes[0, 0].legend(fontsize=8)
     for ax in axes[-1]:
         ax.set_xlabel("time [h]")
 
@@ -148,7 +189,7 @@ def plot_elements(times, states, sats, name=""):
     return fig
 
 
-def plot_altitude(times, states, sats, name=""):
+def plot_altitude(times, states, sats, name="", *, target_states=None):
     """Instantaneous altitude |r| - R_E vs time, one line per sat."""
     colors, _, _ = _plane_colors(sats)
     N = states.shape[0]
@@ -158,6 +199,11 @@ def plot_altitude(times, states, sats, name=""):
     for i in range(N):
         r_norm = np.linalg.norm(states[i, :3, :], axis=0)
         ax.plot(t_h, r_norm - R_EARTH, color=colors[i], linewidth=0.6)
+    if target_states is not None:
+        for j, reference in enumerate(target_states):
+            ax.plot(t_h, np.linalg.norm(reference[:3], axis=0)-R_EARTH, "--",
+                    color=colors[j % N], label="Target at time t" if j == 0 else None)
+        ax.legend(fontsize=8)
     ax.set_xlabel("time [h]")
     ax.set_ylabel("altitude [km]")
     ax.set_title(f"Altitude vs time{' - ' + name if name else ''}")
@@ -167,7 +213,7 @@ def plot_altitude(times, states, sats, name=""):
     return fig
 
 
-def plot_ground_tracks(times, states, sats, name=""):
+def plot_ground_tracks(times, states, sats, name="", *, target_states=None):
     """Ground tracks on a rectangular lat/lon map (simple ECEF via -omega*t rotation)."""
     colors, planes, _ = _plane_colors(sats)
     N = states.shape[0]
@@ -178,10 +224,13 @@ def plot_ground_tracks(times, states, sats, name=""):
 
     fig, ax = plt.subplots(figsize=(12, 6))
     labeled_planes = set()
-    for i in range(N):
-        x_e = cos_g * states[i, 0, :] + sin_g * states[i, 1, :]
-        y_e = -sin_g * states[i, 0, :] + cos_g * states[i, 1, :]
-        z_e = states[i, 2, :]
+    tracks = [(states[i], colors[i], False, i) for i in range(N)]
+    if target_states is not None:
+        tracks += [(ref, colors[j % N], True, j) for j, ref in enumerate(target_states)]
+    for track, color, reference, i in tracks:
+        x_e = cos_g * track[0] + sin_g * track[1]
+        y_e = -sin_g * track[0] + cos_g * track[1]
+        z_e = track[2]
         r_norm = np.sqrt(x_e**2 + y_e**2 + z_e**2)
         lat = np.rad2deg(np.arcsin(z_e / r_norm))
         lon = np.rad2deg(np.arctan2(y_e, x_e))
@@ -192,10 +241,13 @@ def plot_ground_tracks(times, states, sats, name=""):
         lon_p = np.insert(lon, jumps + 1, np.nan)
 
         label = None
-        if planes[i] is not None and planes[i] not in labeled_planes:
+        if reference:
+            label = "Reference ground track" if i == 0 else None
+        elif planes[i] is not None and planes[i] not in labeled_planes:
             label = f"plane {planes[i]}"
             labeled_planes.add(planes[i])
-        ax.plot(lon_p, lat_p, color=colors[i], linewidth=0.5, label=label)
+        ax.plot(lon_p, lat_p, color=color, linestyle="--" if reference else "-",
+                linewidth=0.5, label=label)
 
     ax.set_xlim(-180.0, 180.0)
     ax.set_ylim(-90.0, 90.0)
@@ -205,8 +257,8 @@ def plot_ground_tracks(times, states, sats, name=""):
     ax.set_ylabel("latitude [deg]")
     ax.set_title(f"Ground tracks{' - ' + name if name else ''}")
     ax.grid(True, alpha=0.3)
-    if labeled_planes:
-        ax.legend(loc="lower left", fontsize=8, ncol=min(len(labeled_planes), 6))
+    if labeled_planes or target_states is not None:
+        ax.legend(loc="lower left", fontsize=8, ncol=max(1, min(len(labeled_planes), 6)))
     fig.tight_layout()
     _savefig(fig, name, "ground_tracks")
     return fig
@@ -293,16 +345,68 @@ def finish_plots(show=True):
         plt.close("all")
 
 
+def plot_control_effort(times, states, sats, name=""):
+    """Sample commanded throttle and applied thrust acceleration (no gravity/drag).
+
+    Commands are evaluated at saved states; narrow eclipse switches between
+    saved samples are not resolved. Callbacks should be deterministic.
+    """
+    colors, _, _ = _plane_colors(sats)
+    fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    for j, sat in enumerate(sats):
+        throttle = np.zeros(len(times))
+        acceleration = np.zeros(len(times))
+        if sat.thrust_command is not None:
+            for k, t in enumerate(times):
+                state = states[j, :, k]
+                if state[6] <= sat.dry_mass:
+                    continue
+                command, _ = sat.thrust_command(t, state.copy())
+                force = sat.thruster.force(command)
+                throttle[k] = force / sat.thruster.max_thrust
+                acceleration[k] = force / state[6]  # N/kg = m/s^2
+        axes[0].step(times/DAY_TO_SEC, throttle, where="post", color=colors[j],
+                     linewidth=.7, label=sat.name or f"sat {j}")
+        axes[1].plot(times/DAY_TO_SEC, acceleration, color=colors[j], linewidth=.7)
+    axes[0].set_ylabel("Throttle [-]")
+    axes[0].set_ylim(-.05, 1.05)
+    if len(sats) <= 8:
+        axes[0].legend(fontsize=8)
+    axes[1].set_ylabel("Thrust acceleration [m/s²]")
+    axes[1].set_xlabel("Time [days]")
+    for ax in axes:
+        ax.grid(alpha=.3)
+    fig.suptitle(f"Sampled control effort{' - ' + name if name else ''}")
+    fig.tight_layout()
+    _savefig(fig, name, "control_effort")
+    return fig
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
-def summary(times, states, sats, name="", show=True, plot_endpoints=False):
-    """Save/show all panels; plot_endpoints enables 3D start and final markers."""
-    plot_trajectories_3d(times, states, sats, name, plot_endpoints=plot_endpoints)
-    plot_elements(times, states, sats, name)
-    plot_altitude(times, states, sats, name)
-    plot_ground_tracks(times, states, sats, name)
+def summary(times, states, sats, name="", show=True, plot_endpoints=False, *, target_elements=None):
+    """Save/show panels, optionally overlaying time-dependent target orbits.
+
+    target_elements is (N_targets, 6, len(times)), in km/radians, sampled at
+    the same epochs as states. Use astro.j2_reference() for secular J2 motion
+    or provide your own target ephemeris. None preserves the original plots.
+    The 3D target rings/markers are at times[-1]; other references evolve
+    with time. Reference phase is only a slot requirement if you specify one.
+    """
+    target_states = None
+    if target_elements is not None:
+        target_elements = np.asarray(target_elements)
+        target_states = np.array([[np.concatenate(coe_to_cart(ref[:, k], MU_EARTH))
+                                   for k in range(len(times))] for ref in target_elements]).transpose(0, 2, 1)
+    plot_trajectories_3d(times, states, sats, name, plot_endpoints=plot_endpoints,
+                         target_elements=target_elements)
+    plot_elements(times, states, sats, name, target_elements=target_elements)
+    plot_altitude(times, states, sats, name, target_states=target_states)
+    plot_ground_tracks(times, states, sats, name, target_states=target_states)
+    if any(sat.thrust_command is not None for sat in sats):
+        plot_control_effort(times, states, sats, name)
     if name:
         print(f"[plots] saved to {PLOT_DIR / name}/")
     if show:

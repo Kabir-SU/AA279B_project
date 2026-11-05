@@ -5,7 +5,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 
 from astro import coe_to_cart
-from constants import MU_EARTH, N_STATES, POSITION_SLICE, VELOCITY_SLICE, MASS_INDEX
+from constants import MU_EARTH, R_EARTH, N_STATES, POSITION_SLICE, VELOCITY_SLICE, MASS_INDEX
 from dynamics import accelerations
 
 
@@ -98,9 +98,11 @@ class Simulator:
         self.atol = atol
         self.method = method
 
-    def propagate(self, t_span, t_eval=None, max_step=np.inf):
+    def propagate(self, t_span, t_eval=None, max_step=np.inf, *, min_altitude=None):
         """Integrate from t_span[0] to t_span[1].
         max_step limits adaptive steps [s]
+        min_altitude optionally stops all satellites when any descends through
+        that altitude [km]. The exact stopping state is included in the output.
 
         Returns
         -------
@@ -122,6 +124,15 @@ class Simulator:
         use_j2 = "J2" in self.perturbations
         use_drag = "drag" in self.perturbations
 
+        events = None
+        if min_altitude is not None:
+            def altitude_stop(t, flat_state, *args):
+                positions = flat_state.reshape(N, N_STATES)[:, POSITION_SLICE]
+                return np.min(np.linalg.norm(positions, axis=1)) - R_EARTH - min_altitude
+            altitude_stop.terminal = True
+            altitude_stop.direction = -1
+            events = altitude_stop
+
         sol = solve_ivp(
             accelerations,
             t_span,
@@ -131,15 +142,24 @@ class Simulator:
             rtol=self.rtol,
             atol=self.atol,
             max_step=max_step,
+            events=events,
             args=(cda, use_j2, use_drag, self.earth_rotation, self.satellites),
         )
         if not sol.success:
             raise RuntimeError(f"Propagation failed: {sol.message}")
 
-        states = sol.y.reshape(N, N_STATES, -1)
+        times, values = sol.t, sol.y
+        if events is not None and len(sol.t_events[0]):
+            stop_time = sol.t_events[0][0]
+            if len(times) == 0:
+                values = np.empty((N * N_STATES, 0))
+            if len(times) == 0 or times[-1] != stop_time:
+                times = np.append(times, stop_time)
+                values = np.column_stack([values, sol.y_events[0][0]])
+        states = values.reshape(N, N_STATES, -1)
 
         # Clamp numerical undershoot at fuel cutoff.
         for i, sat in enumerate(self.satellites):
             if sat.thrust_command is not None:
                 states[i, MASS_INDEX] = np.maximum(states[i, MASS_INDEX], sat.dry_mass)
-        return sol.t, states
+        return times, states

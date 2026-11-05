@@ -6,7 +6,7 @@ Also propagates the planned thrust schedule with J2, drag, and eclipses.
 
 import numpy as np
 
-from astro import cart_to_coe
+from astro import j2_reference, cart_to_coe
 from constants import DAY_TO_SEC, G0, R_EARTH, MU_EARTH, OMEGA_EARTH, J2
 from dynamics import density
 from planner import algorithm_1, algorithm_2, make_w_ecl
@@ -121,7 +121,9 @@ def propagate_plan(common, plan, planned_dv, duration, show):
     plot_planner_comparison(times, states, elements, plan, common,
                             target_node, expected_fuel, name="low_thrust_drift")
     summary(times, states, [sat], name="low_thrust_drift",
-            show=False, plot_endpoints=True)
+            show=False, plot_endpoints=True,
+            target_elements=np.array([j2_reference(
+                (common["a_f"], 0, common["i_f"], np.deg2rad(-5), 0, 0), times)]))
     finish_plots(show)
     return times, states
 

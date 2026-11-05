@@ -10,12 +10,28 @@
 
 ## ideas
 - multiple shooting
+  - seeded by planner input
 - iLQR
 - 
 
 
+## Steps
+- Loose trajectory - initial pass 1
+  - Duration, drift params, thrust-coast-thrust structure
+- Redefine thrust distribution - initial pass 2
+  - Correction based on how much it changes the ellipse
+  - Trajectory-to-go heuristic based on orbital element error from target elements
+- Optimization
+  - 
 
-## Issues
+
+## Ideas (post everything)
+- *Strategy*
+  - Continuous thrust transfer planner (with algorithms from Apa)
+    <!-- - Apa, Ruggiero/Pergola, Varga -->
+  - Discrete propagation for verification
+- *Differences*
+  - averaged dynamics and open loop control
 - *Eclipse*
   - Issue
     - Planner averages thrust over time due to eclipse fraction
@@ -25,5 +41,6 @@
     - After inclination added, based on eccentricity, add thrusting on other side or subtract thrusting on close side to circularize
   - Comments
     - Depends on mission requirements (eccentricity allowance)
+    - Sumanth's and Apa
 - 
 

@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 from scipy.integrate import trapezoid
 
-from astro import cart_to_coe, coe_to_cart, wrap_to_pi
+from astro import j2_reference, cart_to_coe, coe_to_cart, wrap_to_pi
 from constants import DAY_TO_SEC, G0, J2, MU_EARTH, R_EARTH
 from planner import algorithm_1, make_w_ecl
 from plots import summary, plot_target_constellation, finish_plots
@@ -19,6 +19,7 @@ from sim import Satellite, Simulator, Thruster, walker
 
 GPS_A = R_EARTH + 20200.0
 GPS_I = np.deg2rad(55.0)
+NSTEPS = 10000
 
 
 def target_rates():
@@ -101,12 +102,14 @@ def run(mode="one", show=True, plan_only=False, days=None, eclipses=True):
     if plan_only:
         return sats, profiles, targets
     if days is not None:
-        end = min(end, days*DAY_TO_SEC)
+        end = max(end, days*DAY_TO_SEC)
     print(f"Propagating {len(sats)} satellites for {end/DAY_TO_SEC:.2f} days...", flush=True)
     sim = Simulator(sats, perturbations=("J2", "drag"), rtol=1e-8, atol=1e-10)
-    times, states = sim.propagate((0, end), t_eval=np.linspace(0, end, 3000), max_step=180)
+    times, states = sim.propagate((0, end), t_eval=np.linspace(0, end, NSTEPS), max_step=180)
     name = f"gps_deployment_{mode}" + ("" if eclipses else "_no_eclipse")
-    summary(times, states, sats, name=name, show=False, plot_endpoints=True)
+    references = np.array([j2_reference(cart_to_coe(s.r, s.v, MU_EARTH), times) for s in targets])
+    summary(times, states, sats, name=name, show=False, plot_endpoints=True,
+            target_elements=references)
 
     node_rate, u_rate = target_rates()
     planes = [(GPS_A, 0, GPS_I, plane*np.pi/3+node_rate*end, 0, 0)

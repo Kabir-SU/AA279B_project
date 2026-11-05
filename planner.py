@@ -1,17 +1,29 @@
+"""Averaged low-thrust planning following Apa et al.'s Algorithms 1 and 2.
+
+Powered arcs use the extended Edelbaum formulation, not Cartesian shooting or
+feedback control. Scenario callbacks such as make_command() are implementation
+adapters that turn these profiles into ECI thrust commands; they are not
+textbook functions or part of the planner's optimality assumptions.
+"""
+
 import numpy as np
 
 from constants import R_EARTH, J2, MU_EARTH, G0
 
 
 def make_w_ecl(sun_vector_eci, R_e=R_EARTH):
-    """Orbit-averaged sunlit fraction; sun_vector_eci(t) supplies the Sun direction.
+    """Create Sumanth's circular-orbit, cylindrical-shadow sunlight model.
 
     Use the same ECI frame for the Sun and orbit, km for radii, radians for
     angles, and define the calendar epoch inside sun_vector_eci.
+    The returned callback w_ecl(t, a, i, Omega) gives 1 - eclipse_fraction:
+    1 means full sunlight. This averages availability over an orbit; it does
+    not locate instantaneous eclipse entry/exit or model penumbra.
 
     References
     ----------
-    Sumanth R M - Computation of Eclipse Time for Low-Earth Orbiting Small Satellites Satellites 
+    Sumanth R M, "Computation of Eclipse Time for Low-Earth Orbiting Small
+    Satellites," Eqs. (5), (7), (10)-(13).
     """
     def w_ecl(t, a, i, Omega):
         sun = np.asarray(sun_vector_eci(t), dtype=float)
@@ -32,9 +44,21 @@ def algorithm_1(
     t_i, a_i, a_f, i_i, i_f, Omega_i, m_i, I_sp,
     T_max, rho_0, H_0, C_D, S, N, w_ecl,
     mu=MU_EARTH, R_e=R_EARTH,
-    J2=J2, *, return_details=False,
+    *, return_details=False,
 ):
-    """Minimum-time two-orbital-element trageting (a_i,i_i) -> (a_f,i_f)
+    """Estimate an averaged Edelbaum transfer (a_i, i_i) -> (a_f, i_f).
+
+    Follows Apa et al.'s Algorithm 1: quasi-circular orbit geometry with
+    maximum thrust when available, mass depletion, averaged eclipse/drag
+    timing corrections, and secular J2 RAAN drift. This is a preliminary
+    minimum-time approximation, not a constrained trajectory optimization.
+
+    The beta profile is the out-of-plane yaw angle relative to tangential
+    thrust. Executing it requires local-frame to ECI conversion and normal
+    thrust sign reversals over each revolution (Edelbaum/Gauss steering).
+    Those operations, including the choice to use planned RAAN for switching,
+    belong to scenario callbacks such as make_command(), not this algorithm.
+    Final orbital phase and eccentricity are not independently targeted.
 
     Parameters
     ----------
@@ -65,27 +89,37 @@ def algorithm_1(
         Number of transfer discretization points; at least two.
     w_ecl : callable
         Function (t, a, i, Omega) returning the orbit-averaged fraction
-        available for thrusting, in (0, 1]. See [this](https://commons.erau.edu/ijaaa/vol6/iss5/15/)
+        available for thrusting, in (0, 1]. Use 1 for continuous sunlight.
     mu : float, optional
         Central-body gravitational parameter [km^3/s^2].
     R_e : float, optional
         Central-body equatorial radius [km].
-
     return_details : bool, keyword-only
         Append a dictionary of phase/profile arrays without changing the calculation.
 
     Returns
     -------
     Delta_V_f : float
-        Transfer velocity increment [km/s].
+        Edelbaum characteristic velocity increment [km/s]. Drag changes the
+        estimated duration; it does not add a separate loss to this value.
     Delta_t : float
         Transfer duration, including eclipse and drag effects [s].
     Delta_Omega : float
         Accumulated, unwrapped J2 RAAN change [rad].
+    details : dict, optional
+        Appended when return_details=True: arrays t [absolute seconds], a [km],
+        i and Omega [rad], m [kg], and beta [rad].
 
     References
     ----------
-    Riccardo - Low-Thrust Propulsion and Drift Orbit Optimization for Multi-Client Servicing Missions in Low Earth Orbit
+    Apa, Hudson, and Romano, "Low-Thrust Propulsion and Drift Orbit
+    Optimization for Multi-Client Servicing Missions in Low Earth Orbit,"
+    Algorithm 1.
+    Kluever, "Using Edelbaum's Method to Compute Low-Thrust Transfers with
+    Earth-Shadow Eclipses."
+    Kluever, "Low-Thrust Trajectory Optimization Using Orbital Averaging and
+    Control Parameterization," in Spacecraft Trajectory Optimization,
+    edited by Conway, Chapter 5 (textbook background).
     """
 
     if a_i == a_f and i_i == i_f:
@@ -199,7 +233,18 @@ def algorithm_2(
     Omega_c_i, a_D, i_D, w_ecl,
     mu=MU_EARTH, R_e=R_EARTH, *, return_details=False,
 ):
-    """Minimum-time two-orbital-element targeting (a_i,i_i) -> (a_f,i_f)
+    """Estimate a thrust-drift-thrust transfer with approximate RAAN matching.
+
+    Follows Apa et al.'s Algorithm 2 for specified drift parameters a_D, i_D;
+    it does not optimize those parameters. Algorithm 1 supplies the powered
+    legs, differential J2 precession supplies the RAAN correction, and the
+    drift includes a constant-acceleration drag-compensation estimate.
+
+    This is the non-iterative approximation: leg 3 is evaluated immediately
+    after leg 1 using its predicted end mass/RAAN, without shifting the
+    eclipse model to the post-drift epoch or including drift fuel depletion
+    in leg 3. Final slot phase is not targeted. Equal drift/target nodal
+    rates make the drift-time expression singular.
 
     Parameters
     ----------
@@ -241,7 +286,6 @@ def algorithm_2(
         Central-body gravitational parameter [km^3/s^2].
     R_e : float, optional
         Central-body equatorial radius [km].
-
     return_details : bool, keyword-only
         Append a dictionary of phase/profile arrays without changing the calculation.
 
@@ -251,16 +295,22 @@ def algorithm_2(
         Total velocity increment, including drift drag compensation [km/s].
     ToF : float
         Total duration of the three phases [s].
+    details : dict, optional
+        Appended when return_details=True: leg1 and leg3 Algorithm 1 profile
+        dictionaries and durations=(thrust_1, drift, thrust_3) [s]. The leg3
+        time array retains its nominal pre-drift epoch.
 
     References
     ----------
-    Riccardo - Low-Thrust Propulsion and Drift Orbit Optimization for Multi-Client Servicing Missions in Low Earth Orbit
+    Apa, Hudson, and Romano, "Low-Thrust Propulsion and Drift Orbit
+    Optimization for Multi-Client Servicing Missions in Low Earth Orbit,"
+    Algorithm 2. See algorithm_1 for the Edelbaum/Kluever powered-arc sources.
     """
     # 1: Initial orbit -> drift orbit
     Delta_V_1, Delta_t_1, Delta_Omega_1, leg1 = algorithm_1(
         t_i, a_i, a_D, i_i, i_D, Omega_i, m_i, I_sp,
         T_max, rho_0, H_0, C_D, S, N, w_ecl,
-        mu, R_e, J2, return_details=True,
+        mu, R_e, return_details=True,
     )
 
     # Mass after phase 1, needed for the second Algorithm 1 call.
@@ -271,7 +321,7 @@ def algorithm_2(
         t_i + Delta_t_1, a_D, a_f, i_D, i_f,
         Omega_i + Delta_Omega_1, m_D, I_sp,
         T_max, rho_0, H_0, C_D, S, N, w_ecl,
-        mu, R_e, J2, return_details=True,
+        mu, R_e, return_details=True,
     )
 
     Omega_dot_D = -1.5 * J2 * np.sqrt(mu/a_D**3) * (R_e/a_D)**2 * np.cos(i_D)
